@@ -4,6 +4,22 @@ Work in progress 🚧
 
 Convert @neo4j/graphql type definitions into https://arrows.app/ diagram. Uses a react app with a iframe.
 
+## Getting Started
+
+```
+$ git clone git@github.com:danstarns/graphql-arrows.git
+```
+
+```
+$ cd graphql-arrows && npm install
+```
+
+```
+$ npm run dev
+```
+
+Navigate to http://localhost:4000
+
 ## Nodes
 
 [![Image from Gyazo](https://i.gyazo.com/a7bed9607598502e5246bd0939039353.gif)](https://gyazo.com/a7bed9607598502e5246bd0939039353)
