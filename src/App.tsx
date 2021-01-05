@@ -1,10 +1,28 @@
-import React, { DOMElement, useEffect, useRef, useState } from "react";
-import Iframe from "react-iframe";
-import { parse, TypeNode } from "graphql";
+import React, { useEffect, useState } from "react";
+import {
+    DirectiveNode,
+    ObjectTypeDefinitionNode,
+    parse,
+    StringValueNode,
+    TypeNode,
+} from "graphql";
 import AceEditor from "react-ace";
-
 import "ace-builds/src-noconflict/mode-graphqlschema";
 import "ace-builds/src-noconflict/theme-monokai";
+
+function makeId(length: number = 20): string {
+    let result = "";
+    const characters =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+
+    for (var i = 0; i < length; i++) {
+        result += characters.charAt(
+            Math.floor(Math.random() * characters.length)
+        );
+    }
+
+    return result;
+}
 
 interface ArrowsRelationships {
     id: string;
@@ -56,30 +74,103 @@ function getTypeName(type: TypeNode): string {
     }
 }
 
-function contentToArrows(content: string) {
+function typeDefsToArrows(typeDefs: string) {
     try {
-        const document = parse(content);
+        const document = parse(typeDefs);
 
-        const model: ArrowsModel = document.definitions.reduce(
-            (res: ArrowsModel, definition, index, array) => {
-                if (definition.kind !== "ObjectTypeDefinition") {
-                    return res;
-                }
+        const nodes = document.definitions.reduce((res, definition) => {
+            if (definition.kind !== "ObjectTypeDefinition") {
+                return res;
+            }
 
-                const x = array.length * index + 300;
-                const y = array.length / index - 300;
+            const id = makeId();
+
+            return [
+                ...res,
+                {
+                    definition,
+                    id,
+                },
+            ];
+        }, []) as { definition: ObjectTypeDefinitionNode; id: string }[];
+
+        const model: ArrowsModel = nodes.reduce(
+            (res: ArrowsModel, node, index, array) => {
+                const x = array.length + 400 * index;
+                const y = array.length - 400 / index;
+
+                const fields = node.definition.fields.filter(
+                    (x) =>
+                        !x.directives ||
+                        !x.directives.find(
+                            (x) => x.name.value === "relationship"
+                        )
+                );
+
+                const relationships = node.definition.fields.filter(
+                    (x) =>
+                        x.directives &&
+                        x.directives.find(
+                            (x) => x.name.value === "relationship"
+                        )
+                );
 
                 res.graph.nodes.push({
-                    caption: definition.name.value,
-                    id: definition.name.value,
+                    caption: node.definition.name.value,
+                    id: node.id,
                     position: { x, y },
-                    properties: definition.fields.reduce((res, field) => {
+                    properties: fields.reduce((res, field) => {
                         return {
                             ...res,
                             [field.name.value]: getTypeName(field.type),
                         };
                     }, {}),
                 });
+
+                relationships.forEach((relationship) => {
+                    const to = nodes.find(
+                        (x) =>
+                            x.definition.name.value ===
+                            getTypeName(relationship.type)
+                    );
+
+                    const directive = relationship.directives.find(
+                        (x) => x.name.value === "relationship"
+                    ) as DirectiveNode;
+
+                    const direction = (directive.arguments.find(
+                        (x) => x.name.value === "direction"
+                    ).value as StringValueNode).value;
+
+                    const type = (directive.arguments.find(
+                        (x) => x.name.value === "type"
+                    ).value as StringValueNode).value;
+
+                    if (!to) {
+                        throw new Error("invalid relationship");
+                    }
+
+                    const graphRel = {
+                        id: makeId(),
+                        type,
+                        properties: {},
+                    };
+
+                    if (direction === "OUT") {
+                        res.graph.relationships.push({
+                            ...graphRel,
+                            fromId: node.id,
+                            toId: to.id,
+                        });
+                    } else {
+                        res.graph.relationships.push({
+                            ...graphRel,
+                            fromId: to.id,
+                            toId: node.id,
+                        });
+                    }
+                });
+
                 return res;
             },
             {
@@ -95,16 +186,9 @@ function contentToArrows(content: string) {
 }
 
 function DisplayFrame({ url }: { url: string }) {
-    const ref = useRef();
-
-    useEffect(() => {
-        return () => {
-            console.log(ref);
-        };
-    }, []);
-
     return (
         <iframe
+            id="my-frame"
             key={url}
             src={url}
             style={{ width: "100%", height: "100%" }}
@@ -116,7 +200,7 @@ function InputFrame({
     onChange,
     value,
 }: {
-    onChange: (content: string, event: any) => void;
+    onChange: (typeDefs: string, event: any) => void;
     value: string;
 }) {
     return (
@@ -125,30 +209,33 @@ function InputFrame({
             theme="monokai"
             onChange={onChange}
             value={value}
-            fontSize="3em"
+            fontSize="2em"
             style={{ width: "100%", height: "100%" }}
         />
     );
 }
 
 function App() {
-    const [content, setContent] = useState(``);
+    const [typeDefs, setTypeDefs] = useState(``);
     const [url, setUrl] = useState(``);
 
     useEffect(() => {
         setUrl("");
 
-        const arrowsAppModel = contentToArrows(content);
+        const arrowsAppModel = typeDefsToArrows(typeDefs);
 
         const jsonString = JSON.stringify(arrowsAppModel);
 
         setUrl("https://arrows.app/#/import/json=" + btoa(jsonString));
-    }, [content]);
+    }, [typeDefs]);
 
     return (
         <div className="d-flex">
             <div className="m-2 w-50 vh-100">
-                <InputFrame onChange={setContent} value={content}></InputFrame>
+                <InputFrame
+                    onChange={setTypeDefs}
+                    value={typeDefs}
+                ></InputFrame>
             </div>
             {url && (
                 <div className="m-2 w-50 vh-100">
