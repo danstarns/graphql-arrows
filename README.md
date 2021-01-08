@@ -1,13 +1,6 @@
 # graphql-arrows
 
-Work in progress 🚧
-
 Convert @neo4j/graphql type definitions into https://arrows.app/ diagram. Uses a React app with a iframe. Note the translation is only going one way typeDefs => arrows.
-
-## Issues
-
-1. Calculating the x & y so they do not overlap
-2. Cyclic relationships
 
 ## Getting Started
 
