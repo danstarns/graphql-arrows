@@ -75,114 +75,128 @@ function getTypeName(type: TypeNode): string {
 }
 
 function typeDefsToArrows(typeDefs: string) {
-    try {
-        const document = parse(typeDefs);
+    const document = parse(typeDefs);
 
-        const nodes = document.definitions.reduce((res, definition) => {
-            if (definition.kind !== "ObjectTypeDefinition") {
-                return res;
-            }
+    const nodes = document.definitions.reduce((res, definition) => {
+        if (definition.kind !== "ObjectTypeDefinition") {
+            return res;
+        }
 
-            const id = makeId();
+        const id = makeId();
 
-            return [
-                ...res,
-                {
-                    definition,
-                    id,
-                },
-            ];
-        }, []) as { definition: ObjectTypeDefinitionNode; id: string }[];
+        return [
+            ...res,
+            {
+                definition,
+                id,
+            },
+        ];
+    }, []) as { definition: ObjectTypeDefinitionNode; id: string }[];
 
-        const model: ArrowsModel = nodes.reduce(
-            (res: ArrowsModel, node, index, array) => {
-                const x = array.length + 400 * index;
-                const y = array.length - 400 / index;
+    const model: ArrowsModel = nodes.reduce(
+        (res: ArrowsModel, node, index, array) => {
+            const x = res.graph.nodes.length + 450 * index;
+            const y = res.graph.nodes.length - 450 / index;
 
-                const fields = node.definition.fields.filter(
+            const fields = node.definition.fields.filter(
+                (x) =>
+                    !x.directives ||
+                    !x.directives.find((x) => x.name.value === "relationship")
+            );
+
+            const relationships = node.definition.fields.filter(
+                (x) =>
+                    x.directives &&
+                    x.directives.find((x) => x.name.value === "relationship")
+            );
+
+            res.graph.nodes.push({
+                caption: node.definition.name.value,
+                id: node.id,
+                position: { x, y },
+                properties: fields.reduce((res, field) => {
+                    return {
+                        ...res,
+                        [field.name.value]: getTypeName(field.type),
+                    };
+                }, {}),
+            });
+
+            relationships.forEach((relationship) => {
+                const to = nodes.find(
                     (x) =>
-                        !x.directives ||
-                        !x.directives.find(
-                            (x) => x.name.value === "relationship"
-                        )
+                        x.definition.name.value ===
+                        getTypeName(relationship.type)
                 );
 
-                const relationships = node.definition.fields.filter(
-                    (x) =>
-                        x.directives &&
-                        x.directives.find(
-                            (x) => x.name.value === "relationship"
-                        )
-                );
+                const directive = relationship.directives.find(
+                    (x) => x.name.value === "relationship"
+                ) as DirectiveNode;
 
-                res.graph.nodes.push({
-                    caption: node.definition.name.value,
-                    id: node.id,
-                    position: { x, y },
-                    properties: fields.reduce((res, field) => {
-                        return {
-                            ...res,
-                            [field.name.value]: getTypeName(field.type),
-                        };
-                    }, {}),
-                });
+                const direction = (directive.arguments.find(
+                    (x) => x.name.value === "direction"
+                ).value as StringValueNode).value;
 
-                relationships.forEach((relationship) => {
-                    const to = nodes.find(
+                const type = (directive.arguments.find(
+                    (x) => x.name.value === "type"
+                ).value as StringValueNode).value;
+
+                if (!to) {
+                    throw new Error("invalid relationship");
+                }
+
+                const graphRel = {
+                    id: makeId(),
+                    type,
+                    properties: {},
+                };
+
+                if (direction === "OUT") {
+                    const existing = res.graph.relationships.find(
                         (x) =>
-                            x.definition.name.value ===
-                            getTypeName(relationship.type)
+                            x.type === type &&
+                            x.fromId === node.id &&
+                            x.toId === to.id
                     );
 
-                    const directive = relationship.directives.find(
-                        (x) => x.name.value === "relationship"
-                    ) as DirectiveNode;
-
-                    const direction = (directive.arguments.find(
-                        (x) => x.name.value === "direction"
-                    ).value as StringValueNode).value;
-
-                    const type = (directive.arguments.find(
-                        (x) => x.name.value === "type"
-                    ).value as StringValueNode).value;
-
-                    if (!to) {
-                        throw new Error("invalid relationship");
-                    }
-
-                    const graphRel = {
-                        id: makeId(),
-                        type,
-                        properties: {},
-                    };
-
-                    if (direction === "OUT") {
+                    if (!existing) {
                         res.graph.relationships.push({
                             ...graphRel,
                             fromId: node.id,
                             toId: to.id,
                         });
-                    } else {
+                    }
+                } else {
+                    const existing = res.graph.relationships.find(
+                        (x) =>
+                            x.type === type &&
+                            x.fromId === to.id &&
+                            x.toId === node.id
+                    );
+
+                    if (!existing) {
                         res.graph.relationships.push({
                             ...graphRel,
                             fromId: to.id,
                             toId: node.id,
                         });
                     }
-                });
+                }
+            });
 
-                return res;
+            return res;
+        },
+        {
+            diagramName: "@neo4j/graphql",
+            graph: {
+                nodes: [],
+                relationships: [],
+                style: { ["margin-peer"]: 50 },
             },
-            {
-                diagramName: "@neo4j/graphql",
-                graph: { nodes: [], relationships: [], style: {} },
-            } as ArrowsModel
-        );
+        } as ArrowsModel
+    );
 
-        return model;
-    } catch (error) {
-        console.error(error);
-    }
+    return model;
 }
 
 function DisplayFrame({ url }: { url: string }) {
@@ -222,7 +236,13 @@ function App() {
     useEffect(() => {
         setUrl("");
 
-        const arrowsAppModel = typeDefsToArrows(typeDefs);
+        let arrowsAppModel: any;
+
+        try {
+            arrowsAppModel = typeDefsToArrows(typeDefs);
+        } catch (error) {
+            return;
+        }
 
         const jsonString = JSON.stringify(arrowsAppModel);
 
